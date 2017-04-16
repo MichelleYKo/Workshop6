@@ -3,12 +3,6 @@ var express = require('express');
 // Creates an Express server.
 var app = express();
 
-
-
-//var util = express('./util');
-
-//var reverseString = util.reverseString;
-
 var bodyParser = require('body-parser');
 
 var database = require('./database');
