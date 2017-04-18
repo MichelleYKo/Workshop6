@@ -30,13 +30,16 @@ function getFeedItemSync(feedItemId) {
 /**
  * Emulates a REST call to get the feed data for a particular user.
  */
-export function getFeedData(user, cb) {
-  // We don't need to send a body, so pass in 'undefined' for the body.
-  sendXHR('GET', '/user/4/feed', undefined, (xhr) => {
-    // Call the callback with the data.
-    cb(JSON.parse(xhr.responseText));
-  });
-}
+ /**
+  * Emulates a REST call to get the feed data for a particular user.
+  */
+ export function getFeedData(user, cb) {
+   // We don't need to send a body, so pass in 'undefined' for the body.
+   sendXHR('GET', '/user/4/feed', undefined, (xhr) => {
+     // Call the callback with the data.
+     cb(JSON.parse(xhr.responseText));
+   });
+ }
 
 var token = 'eyJpZCI6NH0='; // <-- Put your base64'd JSON token here
 /**
@@ -109,41 +112,14 @@ function sendXHR(verb, resource, body, cb) {
  * Adds a new status update to the database.
  */
 export function postStatusUpdate(user, location, contents, cb) {
-  // If we were implementing this for real on an actual server, we would check
-  // that the user ID is correct & matches the authenticated user. But since
-  // we're mocking it, we can be less strict.
-
-  // Get the current UNIX time.
-  var time = new Date().getTime();
-  // The new status update. The database will assign the ID for us.
-  var newStatusUpdate = {
-    "likeCounter": [],
-    "type": "statusUpdate",
-    "contents": {
-      "author": user,
-      "postDate": time,
-      "location": location,
-      "contents": contents,
-      "likeCounter": []
-    },
-    // List of comments on the post
-    "comments": []
-  };
-
-  // Add the status update to the database.
-  // Returns the status update w/ an ID assigned.
-  newStatusUpdate = addDocument('feedItems', newStatusUpdate);
-
-  // Add the status update reference to the front of the current user's feed.
-  var userData = readDocument('users', user);
-  var feedData = readDocument('feeds', userData.feed);
-  feedData.contents.unshift(newStatusUpdate._id);
-
-  // Update the feed object.
-  writeDocument('feeds', feedData);
-
-  // Return the newly-posted object.
-  emulateServerReturn(newStatusUpdate, cb);
+  sendXHR('POST', '/feeditem', {
+    userId: user,
+    location: location,
+    contents: contents
+  }, (xhr) => {
+    // Return the new status update.
+    cb(JSON.parse(xhr.responseText));
+  });
 }
 
 /**
@@ -167,34 +143,22 @@ export function postComment(feedItemId, author, contents, cb) {
  * Provides an updated likeCounter in the response.
  */
 export function likeFeedItem(feedItemId, userId, cb) {
-  var feedItem = readDocument('feedItems', feedItemId);
-  // Normally, we would check if the user already liked this comment.
-  // But we will not do that in this mock server.
-  // ('push' modifies the array by adding userId to the end)
-  feedItem.likeCounter.push(userId);
-  writeDocument('feedItems', feedItem);
-  // Return a resolved version of the likeCounter
-  emulateServerReturn(feedItem.likeCounter.map((userId) => readDocument('users', userId)), cb);
+  sendXHR('PUT', '/feeditem/' + feedItemId + '/likelist/' + userId,
+          undefined, (xhr) => {
+    cb(JSON.parse(xhr.responseText));
+  });
 }
 
 /**
- * Updates a feed item's likeCounter by removing the user from the likeCounter.
- * Provides an updated likeCounter in the response.
+ * Updates a feed item's likeCounter by removing the user
+ * from the likeCounter. Provides an updated likeCounter
+ * in the response.
  */
 export function unlikeFeedItem(feedItemId, userId, cb) {
-  var feedItem = readDocument('feedItems', feedItemId);
-  // Find the array index that contains the user's ID.
-  // (We didn't *resolve* the FeedItem object, so it is just an array of user IDs)
-  var userIndex = feedItem.likeCounter.indexOf(userId);
-  // -1 means the user is *not* in the likeCounter, so we can simply avoid updating
-  // anything if that is the case: the user already doesn't like the item.
-  if (userIndex !== -1) {
-    // 'splice' removes items from an array. This removes 1 element starting from userIndex.
-    feedItem.likeCounter.splice(userIndex, 1);
-    writeDocument('feedItems', feedItem);
-  }
-  // Return a resolved version of the likeCounter
-  emulateServerReturn(feedItem.likeCounter.map((userId) => readDocument('users', userId)), cb);
+  sendXHR('DELETE', '/feeditem/' + feedItemId + '/likelist/' + userId,
+	      undefined, (xhr) => {
+    cb(JSON.parse(xhr.responseText));
+  });
 }
 
 /**
@@ -228,62 +192,23 @@ export function unlikeComment(feedItemId, commentIdx, userId, cb) {
  * Updates the text in a feed item (assumes a status update)
  */
 export function updateFeedItemText(feedItemId, newContent, cb) {
-  var feedItem = readDocument('feedItems', feedItemId);
-  // Update text content of update.
-  feedItem.contents.contents = newContent;
-  writeDocument('feedItems', feedItem);
-  emulateServerReturn(getFeedItemSync(feedItemId), cb);
+  sendXHR('PUT', '/feeditem/' + feedItemId + '/content', newContent, (xhr) => {
+    cb(JSON.parse(xhr.responseText));
+  });
 }
 
-/**
- * Deletes a feed item.
- */
 export function deleteFeedItem(feedItemId, cb) {
-  // Assumption: The current user authored this feed item.
-  deleteDocument('feedItems', feedItemId);
-  // Remove references to this feed item from all other feeds.
-  var feeds = getCollection('feeds');
-  var feedIds = Object.keys(feeds);
-  feedIds.forEach((feedId) => {
-    var feed = feeds[feedId];
-    var itemIdx = feed.contents.indexOf(feedItemId);
-    if (itemIdx !== -1) {
-      // Splice out of array.
-      feed.contents.splice(itemIdx, 1);
-      // Update feed.
-      writeDocument('feeds', feed);
-    }
+  sendXHR('DELETE', '/feeditem/' + feedItemId, undefined, () => {
+    cb();
   });
-
-  // Return nothing. The return just tells the client that
-  // the server has acknowledged the request, and that it has
-  // been a success.
-  emulateServerReturn(null, cb);
 }
 
 /**
  * Searches for feed items with the given text.
  */
-export function searchForFeedItems(userId, queryText, cb) {
-  // trim() removes whitespace before and after the query.
-  // toLowerCase() makes the query lowercase.
-  queryText = queryText.trim().toLowerCase();
-  var feedId = readDocument('users', userId).feed;
-  var feedItemIDs = readDocument('feeds', feedId).contents;
-  emulateServerReturn(
-    // "filter" is like "map" in that it is a magic method for
-    // arrays. It takes an anonymous function, which it calls
-    // with each item in the array. If that function returns 'true',
-    // it will include the item in a return array. Otherwise, it will
-    // not.
-    // Here, we use filter to return only feedItems that contain the
-    // query text.
-    // Since the array contains feed item IDs, we later map the filtered
-    // IDs to actual feed item objects.
-    feedItemIDs.filter((feedItemID) => {
-      var feedItem = readDocument('feedItems', feedItemID);
-      return feedItem.contents.contents.toLowerCase().indexOf(queryText) !== -1;
-    }).map(getFeedItemSync),
-    cb
-  );
+export function searchForFeedItems(userID, queryText, cb) {
+  // userID is not needed; it's included in the JSON web token.
+  sendXHR('POST', '/search', queryText, (xhr) => {
+    cb(JSON.parse(xhr.responseText));
+  });
 }
